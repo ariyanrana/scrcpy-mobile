@@ -29,7 +29,11 @@ jobs:
       - name: Install native build tools
         run: |
           brew update
-          brew install cmake meson ninja pkg-config nasm automake autoconf libtool gas-preprocessor
+          brew install cmake meson ninja pkg-config nasm automake autoconf libtool
+          # gas-preprocessor is an upstream Perl script, not a Homebrew formula.
+          sudo curl -fsSL https://raw.githubusercontent.com/FFmpeg/gas-preprocessor/master/gas-preprocessor.pl -o /usr/local/bin/gas-preprocessor.pl
+          sudo chmod 755 /usr/local/bin/gas-preprocessor.pl
+          command -v perl
 
       - name: Verify project and server inputs
         run: |
@@ -74,6 +78,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild build \
             -project scrcpy-ios/scrcpy-ios.xcodeproj \
             -scheme scrcpy-ios \
