@@ -55,6 +55,16 @@ jobs:
           # New CMake releases removed compatibility with projects declaring
           # a minimum version older than 3.5; keep legacy subprojects buildable.
           export CMAKE_POLICY_VERSION_MINIMUM=3.5
+
+          # The pinned adb-mobile submodule predates fixes for current Xcode/CMake:
+          # it omitted the bundled fmt configuration and used a broken zstd build
+          # script. Use the upstream fix commit while keeping the app repo unchanged.
+          ADB_MOBILE_FIX=681f4604cc2a8797b06201e2a9751672a32f7bb8
+          git -C external/adb-mobile fetch --depth=1 origin "$ADB_MOBILE_FIX"
+          git -C external/adb-mobile checkout --detach "$ADB_MOBILE_FIX"
+          git -C external/adb-mobile submodule sync --recursive
+          git -C external/adb-mobile submodule update --init --recursive --force
+
           make -C porting adb-mobile libsdl ffmpeg
 
           cd scrcpy
