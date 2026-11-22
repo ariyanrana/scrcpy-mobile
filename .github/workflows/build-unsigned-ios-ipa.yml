@@ -30,6 +30,10 @@ jobs:
         run: |
           brew update
           brew install cmake meson ninja pkg-config nasm automake autoconf libtool
+          # adb-mobile requires the pinned Protocol Buffers compiler (28.3).
+          brew unlink protobuf || true
+          brew install ./external/adb-mobile/porting/protobuf.rb
+          protoc --version
           # gas-preprocessor is an upstream Perl script, not a Homebrew formula.
           sudo curl -fsSL https://raw.githubusercontent.com/FFmpeg/gas-preprocessor/master/gas-preprocessor.pl -o /usr/local/bin/gas-preprocessor.pl
           sudo chmod 755 /usr/local/bin/gas-preprocessor.pl
