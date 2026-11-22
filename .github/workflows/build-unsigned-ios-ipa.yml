@@ -1,0 +1,119 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/ios-unsigned-ipa
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build scrcpy-ios for iPhone
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install native build tools
+        run: |
+          brew update
+          brew install cmake meson ninja pkg-config nasm automake autoconf libtool gas-preprocessor
+
+      - name: Verify project and server inputs
+        run: |
+          test -d scrcpy-ios/scrcpy-ios.xcodeproj
+          test -f scrcpy-app/ADBClient/scrcpy-server
+          xcodebuild -list -project scrcpy-ios/scrcpy-ios.xcodeproj
+
+      - name: Build iOS dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make -C porting adb-mobile libsdl ffmpeg
+
+          cd scrcpy
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/porting/libs/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          meson setup x --buildtype=release --strip -Db_lto=true -Dusb=false
+          cd "$GITHUB_WORKSPACE"
+
+          make -C porting scrcpy
+
+          # The Xcode target links -ladb, while adb-mobile stages its full
+          # static archive as libadb-full.a. Provide the conventional linker name.
+          if [ -f porting/libs/iphoneos/arm64/libadb-full.a ] && [ ! -e porting/libs/iphoneos/arm64/libadb.a ]; then
+            ln -s libadb-full.a porting/libs/iphoneos/arm64/libadb.a
+          fi
+
+          echo "Built iPhone libraries:"
+          find porting/libs/iphoneos/arm64 -maxdepth 1 -type f -name '*.a' -print
+
+      - name: Align Xcode linker flag with the SDL3 library built above
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          project = Path("scrcpy-ios/scrcpy-ios.xcodeproj/project.pbxproj")
+          source = project.read_text()
+          if '"-lSDL2"' in source:
+              source = source.replace('"-lSDL2"', '"-lSDL3"')
+              project.write_text(source)
+          PY
+
+      - name: Build unsigned iOS app
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project scrcpy-ios/scrcpy-ios.xcodeproj \
+            -scheme scrcpy-ios \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            LIBRARY_SEARCH_PATHS='$(inherited) $(SRCROOT)/../porting/libs/iphoneos/arm64' \
+            HEADER_SEARCH_PATHS='$(inherited) $(SRCROOT)/../porting/libs/include' \
+            2>&1 | tee build/xcodebuild.log
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/scrcpy-ios.app"
+          test -d "$APP_PATH"
+          rm -rf Payload scrcpy-mobile-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          ditto -c -k --sequesterRsrc --keepParent Payload scrcpy-mobile-unsigned.ipa
+          unzip -l scrcpy-mobile-unsigned.ipa | head -40
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrcpy-mobile-unsigned-ipa
+          path: scrcpy-mobile-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrcpy-ios-build-log
+          path: |
+            build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
