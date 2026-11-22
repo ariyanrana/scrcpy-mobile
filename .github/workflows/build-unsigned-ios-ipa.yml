@@ -52,6 +52,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          # New CMake releases removed compatibility with projects declaring
+          # a minimum version older than 3.5; keep legacy subprojects buildable.
+          export CMAKE_POLICY_VERSION_MINIMUM=3.5
           make -C porting adb-mobile libsdl ffmpeg
 
           cd scrcpy
